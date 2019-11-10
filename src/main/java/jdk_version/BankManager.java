@@ -4,13 +4,16 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
+/**
+ * @author SeanMcGrath
+ */
 public class BankManager implements Runnable {
 
     private final int MAX_PEOPLE = 500;
 
-    private ConcurrentHashMap<Integer, AtomicInteger> bankDatabase = new ConcurrentHashMap<>();
+    private ConcurrentHashMap<String, AtomicInteger> bankDatabase = new ConcurrentHashMap<>();
     private Person[] people = new Person[MAX_PEOPLE];
-    int[] runningTasks = new int[MAX_PEOPLE];//list of user id's that are running at any given time
+    String[] runningTasks = new String[MAX_PEOPLE];//list of user id's that are running at any given time
 
     private BlockingQueue<Person> finishedTasks = new ArrayBlockingQueue<>(MAX_PEOPLE);
 
@@ -30,9 +33,8 @@ public class BankManager implements Runnable {
      *
      * @param id     - user id
      * @param amount - amount to deposit
-     * @return - not really needed
      */
-    public void deposit(int id, int amount) {//read/write
+    public void deposit(String id, int amount) {//read/write
         bankDatabase.put(id, new AtomicInteger(bankDatabase.get(id).get() + amount));
     }
 
@@ -44,7 +46,7 @@ public class BankManager implements Runnable {
      * @param amount - amount to withdraw
      * @return - true if withdrawn successfully, false otherwise
      */
-    public boolean withdraw(int id, int amount) {//read only or read/write
+    public boolean withdraw(String id, int amount) {//read only or read/write
         AtomicInteger currentAmount = bankDatabase.get(id);
         if (currentAmount.get() - amount > 0) {
             //enough money to withdraw, so attempt withdrawal
@@ -60,14 +62,14 @@ public class BankManager implements Runnable {
      */
     private void initializeUsers() {
         for (int i = 0; i < MAX_PEOPLE; i++) {
-            Person temp = new Person(i);
+            Person temp = new Person(Integer.toString(i));
             people[i] = temp;
         }
 
-        //set runningtasks to default of -1
+        //set runningtasks to default of null
         for(int i=0;i<runningTasks.length;i++)
         {
-            runningTasks[i]= -1;
+            runningTasks[i]= null;
         }
     }
 
@@ -92,7 +94,7 @@ public class BankManager implements Runnable {
                 int user = getOpenUser();
                 Client temp = new Client(this, people[user], decideTask(), finishedTasks);
                 for (int j = 0; j < runningTasks.length; j++) {
-                    if(runningTasks[j] == -1){
+                    if(runningTasks[j] == null){
                         runningTasks[j] = people[user].getAccountNumber();
                     }
                 }
@@ -100,12 +102,14 @@ public class BankManager implements Runnable {
             }
             doRun.set(false);
             taskExecutor.shutdown();
+            while(!taskExecutor.isShutdown()){
+
+            }//wait for executor to shutdown
         };
         Runnable taskListener = () -> {//listens for task completions and removes them from list of running tasks, as well as updates people list with new info
             while (doRun.get()) {
                 try {
                     Person done = finishedTasks.poll(1, TimeUnit.SECONDS);
-
                     if(done != null) {
                         //replace old memory of person
                         for (int i = 0; i < people.length; i++) {
@@ -116,7 +120,7 @@ public class BankManager implements Runnable {
                         //remove person from list of running tasks, so new ones can be made of them
                         for (int i = 0; i < runningTasks.length; i++) {
                             if (done.getAccountNumber() == runningTasks[i]) {
-                                runningTasks[i] = -1;
+                                runningTasks[i] = null;
                             }
                         }
                     } else {
@@ -124,6 +128,7 @@ public class BankManager implements Runnable {
                     }
                 } catch (InterruptedException e) {
                     e.printStackTrace();
+                    System.out.println("exe stack");
                 }
             }
         };
@@ -134,6 +139,9 @@ public class BankManager implements Runnable {
             //
         }
         executor.shutdown();
+        while(!executor.isShutdown()){
+            //wait until shutdown to leave
+        }
     }
 
 
@@ -179,7 +187,7 @@ class Client extends Thread {
     private final BankManager bm;
     private final Person p;
     private final int task;
-    BlockingQueue<Person> doneListener;
+    private BlockingQueue<Person> doneListener;
 
     public Client(BankManager bm, Person p, int task, BlockingQueue<Person> b) {
         this.bm = bm;
@@ -212,9 +220,10 @@ class Client extends Thread {
             p.setMoney(p.getMoney().get()+ThreadLocalRandom.current().nextInt(50000, 2000000));
         }
         try {
-            doneListener.put(p);
+            doneListener.offer(p, 1, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             e.printStackTrace();
+            System.out.println("client stack");
         }
     }
 
@@ -225,10 +234,10 @@ class Client extends Thread {
 }
 
 class Person {
-    private int accountNumber;
+    private String accountNumber;
     private AtomicInteger money;
 
-    public Person(int id) {
+    public Person(String id) {
         this.accountNumber = id;
 
         //initial money in USD, last two digits are change
@@ -247,7 +256,7 @@ class Person {
         return money;
     }
 
-    public int getAccountNumber() {
+    public String getAccountNumber() {
         return accountNumber;
     }
 }
